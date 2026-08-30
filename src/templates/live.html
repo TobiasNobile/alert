@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PatchCore live</title>
+<link rel="stylesheet" href="/static/live.css">
+</head>
+<body>
+
+<header id="bankbar">
+  <div id="bankname">—</div>
+  <div id="chips"></div>
+</header>
+
+<main>
+  <!-- Gauche : constituer une banque. Hors ligne, coûteux, fait une fois. -->
+  <section class="panel">
+    <h2>Banque <span class="hint">construire</span></h2>
+    <form id="fit" autocomplete="off">
+      <label for="task">Tâche<small>nomme la banque, ex. DetectionKnife</small></label>
+      <input id="task" name="task" placeholder="DetectionKnife" required>
+
+      <label for="backbone">Backbone<small>plus lourd = mieux séparé, moins fluide</small></label>
+      <select id="backbone" name="backbone"></select>
+
+      <label>Couches</label>
+      <div id="layers" class="checks"></div>
+      <!-- Ce que la couche retient : les couches basses décrivent la matière,
+           les hautes ce qu'on reconnaît. -->
+      <div class="guide">
+        <span>motif ou texture</span><b>layer2 + layer3</b>
+        <span>objet ou concept</span><b>layer3 + layer4</b>
+      </div>
+
+      <!-- Deux champs courts sur une ligne : cf. .pair dans live.css. Les labels
+           sont alignés en bas pour que les champs restent sur la même ligne même
+           si une aide passe sur deux lignes. -->
+      <div class="pair">
+        <label for="coreset_pct">Coreset<small>fraction des patchs gardée
+          (0,01 = 1 %)</small></label>
+        <label for="train_subset">Images du fit<small>vide = toutes, plafond
+          <b id="maximages">20000</b></small></label>
+        <!-- step doit diviser (valeur - min) : avec min=0,001 un pas de 0,005
+             n'accepterait que 0,001 / 0,006 / 0,011… et refuserait 0,01. -->
+        <input id="coreset_pct" name="coreset_pct" type="number"
+               min="0.001" max="1" step="0.001" value="0.01">
+        <input id="train_subset" name="train_subset" type="number" min="1" step="1"
+               placeholder="toutes">
+      </div>
+
+      <label>Images sans l'anomalie à détecter<small>un sous-dossier anomaly/ est
+        repris s'il existe, et ne sert qu'à calibrer un seuil</small></label>
+      <div class="checks" id="srcmode">
+        <label class="check"><input type="radio" name="srcmode" value="zip" checked>
+          <span>Archive zip</span></label>
+        <label class="check"><input type="radio" name="srcmode" value="dir">
+          <span>Dossier d'images</span></label>
+        <label class="check"><input type="radio" name="srcmode" value="online">
+          <span>Filmer maintenant</span></label>
+      </div>
+      <input id="archive" type="file" accept=".zip,application/zip">
+      <!-- webkitdirectory : le navigateur ne livre jamais de chemin, seulement
+           les fichiers. La page en fait un zip avant l'envoi, ce qui reprend le
+           même trajet côté serveur. -->
+      <input id="folder" type="file" webkitdirectory multiple hidden>
+
+      <!-- Mode online : la caméra tient lieu de jeu d'images. On filme la scène
+           telle qu'elle doit être, et le scoring enchaîne sur la banque obtenue. -->
+      <div class="pair" id="onlinefields" hidden>
+        <label for="duree_s">Durée de prise<small>secondes filmées</small></label>
+        <label for="images_par_s">Images / s<small>deux frames voisines
+          n'apprennent rien de neuf</small></label>
+        <input id="duree_s" type="number" min="2" max="600" step="1" value="20">
+        <input id="images_par_s" type="number" min="0.5" max="30" step="0.5" value="5">
+      </div>
+      <!-- En online le holdout est fait de frames voisines de celles de la
+           banque : le vmax obtenu est un plancher, à remonter à la main si la
+           scène bouge plus que pendant la prise. -->
+      <p id="onlinenote" hidden>Échelle mesurée sur des frames voisines de
+        celles de la banque : plancher optimiste, à remonter si la scène varie
+        plus qu'à la prise.</p>
+      <div class="checks" id="storefield" hidden>
+        <label class="check"><input id="stocker" type="checkbox">
+          <span>Stocker la banque dans coresets/</span></label>
+      </div>
+
+      <div class="actions">
+        <button id="dofit" type="submit">Fitter</button>
+      </div>
+      <div id="fitbar" hidden><div id="fitfill"></div></div>
+      <p id="fitstatus"></p>
+      <p id="fiterror"></p>
+    </form>
+  </section>
+
+  <section id="stage">
+    <div id="camframe">
+      <img id="cam" hidden alt="">
+      <div id="placeholder">caméra à l'arrêt</div>
+      <div id="flash"></div>
+    </div>
+    <div id="score">—</div>
+    <div id="status" class="idle">arrêté</div>
+    <div id="meta"></div>
+    <div id="notice" hidden></div>
+    <button id="snap" type="button" class="secondary" disabled>📷 Enregistrer la frame</button>
+    <div id="capture"></div>
+
+    <!-- Sous la caméra plutôt que dans le panneau de droite : ce sont les deux
+         réglages qu'on ajuste en regardant l'image, ils doivent être visibles
+         sans défiler. Ils restent .live, donc actifs pendant le scoring. -->
+    <div id="stagecontrols">
+      <label class="check">
+        <!-- Coché d'entrée : un objet traverse le champ en quelques frames, et
+             sans lissage la tache disparaît avant d'avoir été vue. -->
+        <input id="smooth_max" class="live" type="checkbox" checked>
+        <!-- Le champ vit dans l'aide, à la place du nombre qu'il remplace : un
+             clic dessus ne coche pas la case, un navigateur ne transmet pas
+             l'activation d'un label à travers un contrôle imbriqué. -->
+        <span>Lissage<small>heatmap et score agrégés par maximum sur
+          <input id="smoothwin" class="live" type="number" min="0.1" max="5"
+                 step="0.1" value="0.3"> s de
+          vidéo<span id="smoothnow"></span></small></span>
+      </label>
+
+      <!-- L'exposant du canal alpha : opacité = (score / vmax - 1) ** alpha,
+           nulle sous vmax. À 1 le fondu est linéaire, à 0 tout est peint. -->
+      <label for="alpha">Opacité<small>exposant du canal alpha ·
+        0 = heatmap pleine</small></label>
+      <div class="slider">
+        <input id="alpha" class="live" type="range" min="0" max="1" step="0.02" value="0.5">
+        <output id="alphaval" for="alpha">—</output>
+      </div>
+    </div>
+  </section>
+
+  <!-- Droite : scorer en direct. Les champs .live s'ajustent sans interrompre. -->
+  <section class="panel" id="livepanel">
+    <h2>Direct <span class="hint">scorer</span></h2>
+    <form id="params" autocomplete="off">
+      <label for="bank_dir">Banque</label>
+      <select id="bank_dir" name="bank_dir"></select>
+
+      <label for="source">Source<small>0 = webcam, ou un fichier</small></label>
+      <input id="source" name="source" value="0">
+      <!-- Un repli, pas un lien vers la doc OpenCV : la page tourne en local,
+           souvent sans réseau, et hors du <label> pour qu'un clic n'aille pas
+           focaliser le champ. -->
+      <details class="formats">
+        <summary>voir les formats disponibles</summary>
+        <p>Vidéo mp4, mov, avi, mkv, webm · image png, jpg, bmp, tif, webp (une
+          seule frame) · séquence <code>img_%04d.png</code> · flux http(s), rtsp,
+          rtmp, udp. Une URL de mp4 exige un serveur qui gère <code>Range</code>.</p>
+      </details>
+
+      <!-- Un fichier choisi n'expose jamais son chemin au navigateur : on
+           l'envoie au serveur, qui répond par un chemin à recopier ci-dessus. -->
+      <!-- Sans aide : la ligne d'état affiche le chemin obtenu dès l'envoi, ce
+           qui dit mieux où le fichier est allé qu'une phrase par avance. -->
+      <label for="video">…ou envoyer une vidéo</label>
+      <input id="video" type="file" accept=".mp4,.mov,.avi,.mkv,.webm,.m4v,video/*">
+      <p id="videostatus"></p>
+
+      <label class="check">
+        <input id="loop" name="loop" type="checkbox">
+        <span>Boucler<small>rejouer un fichier sans fin</small></span>
+      </label>
+
+      <!-- Sans classe .live : le device se choisit avant de démarrer, la banque
+           étant chargée sur celui-là. Un repli cuda -> cpu est silencieux côté
+           calcul, d'où le bandeau #notice que le serveur renseigne. -->
+      <label for="device">Calcul<small>auto = cuda si présent, sinon cpu</small></label>
+      <select id="device" name="device">
+        <option value="auto">auto</option>
+        <option value="cpu">cpu</option>
+        <option value="cuda">cuda</option>
+      </select>
+
+      <div class="actions">
+        <button id="start" type="submit">Démarrer</button>
+        <button id="stop" type="button" class="secondary" disabled>Arrêter</button>
+      </div>
+      <p id="error"></p>
+
+      <!-- Masqués, mais gardés dans le DOM : /api/config les renseigne toujours,
+           donc INFER_FAISS_GPU / INFER_FAISS_THREADS restent effectifs, et
+           readParams() continue de les envoyer. Retirer `hidden` les rend. -->
+      <div id="advanced" hidden>
+        <label for="faiss_threads">Threads FAISS<small>cœurs pour la recherche</small></label>
+        <input id="faiss_threads" name="faiss_threads" type="number" min="1" step="1" value="1">
+
+        <label class="check">
+          <input id="faiss_gpu" name="faiss_gpu" type="checkbox">
+          <span>FAISS sur GPU<small>⚠ exige une carte NVIDIA et faiss-gpu</small></span>
+        </label>
+      </div>
+    </form>
+
+    <h2 class="spaced">Affichage <span class="hint">réglable en direct</span></h2>
+
+    <div class="pair">
+      <label for="stride">Stride<small>ne score qu'une frame sur N</small></label>
+      <label for="zoom">Zoom<small>recadrage centré · 1 = pleine image</small></label>
+      <input id="stride" class="live" type="number" min="1" step="1" value="3">
+      <input id="zoom" class="live" type="number" min="1" max="8" step="0.1" value="1">
+    </div>
+
+    <!-- Le commutateur des deux origines possibles du vmax. Coché, c'est
+         l'échelle mesurée au fit sur les images tirées hors banque, qui connaît
+         la scène. Décoché, c'est la table par couche de live.js, qui n'en sait
+         rien mais ne dépend d'aucun fit — et qui suit les cases cochées à
+         gauche. La mesure reste affichée dans les deux cas. -->
+    <label class="check">
+      <input id="selfcalib" class="live" type="checkbox">
+      <span>Self-calibrating VMax<small>vmax = l'échelle mesurée sur les 20 %
+        d'images tirées hors banque, plutôt que la table des couches</small></span>
+    </label>
+
+    <!-- vmax est le pied de la couleur : en dessous rien n'est peint, au-dessus
+         la couleur monte. Mesuré au fit, ou repris de la table par couche selon
+         la case ci-dessus, et réglable en direct dans les deux cas. -->
+    <label for="vmax">Valeur max de normalisation de la heatmap<small><span
+      id="vmaxhint">—</span></small></label>
+    <input id="vmax" class="live" type="number" min="0.1" step="0.1" value="10">
+
+  </section>
+</main>
+
+<script src="/static/live.js"></script>
+
+</body>
+</html>
