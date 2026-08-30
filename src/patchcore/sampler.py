@@ -1,0 +1,232 @@
+import abc
+import logging
+from typing import Union
+
+import numpy as np
+import torch
+import tqdm
+
+LOGGER = logging.getLogger(__name__)
+
+
+class IdentitySampler:
+    def run(
+        self, features: Union[torch.Tensor, np.ndarray]
+    ) -> Union[torch.Tensor, np.ndarray]:
+        return features
+
+
+class BaseSampler(abc.ABC):
+    def __init__(self, percentage: float):
+        if not 0 < percentage < 1:
+            raise ValueError("Percentage value not in (0, 1).")
+        self.percentage = percentage
+
+    @abc.abstractmethod
+    def run(
+        self, features: Union[torch.Tensor, np.ndarray]
+    ) -> Union[torch.Tensor, np.ndarray]:
+        pass
+
+    def _store_type(self, features: Union[torch.Tensor, np.ndarray]) -> None:
+        self.features_is_numpy = isinstance(features, np.ndarray)
+        if not self.features_is_numpy:
+            self.features_device = features.device
+
+    def _restore_type(self, features: torch.Tensor) -> Union[torch.Tensor, np.ndarray]:
+        if self.features_is_numpy:
+            return features.cpu().numpy()
+        return features.to(self.features_device)
+
+
+class GreedyCoresetSampler(BaseSampler):
+    def __init__(
+        self,
+        percentage: float,
+        device: torch.device,
+        dimension_to_project_features_to=128,
+    ):
+        """Greedy Coreset sampling base class."""
+        super().__init__(percentage)
+
+        self.device = device
+        self.dimension_to_project_features_to = dimension_to_project_features_to
+
+    def _reduce_features(self, features, chunk_bytes=256 * 1024 ** 2):
+        if features.shape[1] == self.dimension_to_project_features_to:
+            return features
+        mapper = torch.nn.Linear(
+            features.shape[1], self.dimension_to_project_features_to, bias=False
+        )
+        _ = mapper.to(self.device)
+        # Projection par morceaux. Transférer le nuage complet non projeté sur le
+        # device coûterait N x 1024 x 4 octets (60 Go pour 20 000 images, soit
+        # plus que la plupart des GPU), alors que seul le résultat en
+        # dimension_to_project_features_to est utilisé ensuite : on ne transfère
+        # donc qu'un bloc à la fois. Résultat numériquement identique, le mapper
+        # étant appliqué ligne à ligne.
+        #
+        # La taille du bloc se compte en OCTETS, pas en lignes : une ligne pèse
+        # déjà features.shape[1] x 4 octets, donc raisonner en lignes conduit à
+        # des transferts de plusieurs Go qui saturent le GPU.
+        projected = torch.empty(
+            (features.shape[0], self.dimension_to_project_features_to),
+            device=self.device,
+            dtype=mapper.weight.dtype,
+        )
+        rows = max(1, chunk_bytes // (features.shape[1] * features.element_size()))
+        with torch.no_grad():
+            for start in range(0, features.shape[0], rows):
+                block = features[start : start + rows].to(self.device)
+                projected[start : start + rows] = mapper(block)
+                del block
+        return projected
+
+    def run(
+        self, features: Union[torch.Tensor, np.ndarray]
+    ) -> Union[torch.Tensor, np.ndarray]:
+        """Subsamples features using Greedy Coreset.
+
+        Args:
+            features: [N x D]
+        """
+        if self.percentage == 1:
+            return features
+        self._store_type(features)
+        if isinstance(features, np.ndarray):
+            features = torch.from_numpy(features)
+        reduced_features = self._reduce_features(features)
+        sample_indices = self._compute_greedy_coreset_indices(reduced_features)
+        features = features[sample_indices]
+        return self._restore_type(features)
+
+    @staticmethod
+    def _compute_batchwise_differences(
+        matrix_a: torch.Tensor, matrix_b: torch.Tensor
+    ) -> torch.Tensor:
+        """Computes batchwise Euclidean distances using PyTorch."""
+        a_times_a = matrix_a.unsqueeze(1).bmm(matrix_a.unsqueeze(2)).reshape(-1, 1)
+        b_times_b = matrix_b.unsqueeze(1).bmm(matrix_b.unsqueeze(2)).reshape(1, -1)
+        a_times_b = matrix_a.mm(matrix_b.T)
+
+        return (-2 * a_times_b + a_times_a + b_times_b).clamp(0, None).sqrt()
+
+    def _compute_greedy_coreset_indices(self, features: torch.Tensor) -> np.ndarray:
+        """Runs iterative greedy coreset selection.
+
+        Args:
+            features: [NxD] input feature bank to sample.
+        """
+        distance_matrix = self._compute_batchwise_differences(features, features)
+        coreset_anchor_distances = torch.norm(distance_matrix, dim=1)
+
+        coreset_indices = []
+        num_coreset_samples = int(len(features) * self.percentage)
+
+        for _ in range(num_coreset_samples):
+            select_idx = torch.argmax(coreset_anchor_distances).item()
+            coreset_indices.append(select_idx)
+
+            coreset_select_distance = distance_matrix[
+                :, select_idx : select_idx + 1  # noqa E203
+            ]
+            coreset_anchor_distances = torch.cat(
+                [coreset_anchor_distances.unsqueeze(-1), coreset_select_distance], dim=1
+            )
+            coreset_anchor_distances = torch.min(coreset_anchor_distances, dim=1).values
+
+        return np.array(coreset_indices)
+
+
+class ApproximateGreedyCoresetSampler(GreedyCoresetSampler):
+    def __init__(
+        self,
+        percentage: float,
+        device: torch.device,
+        number_of_starting_points: int = 10,
+        dimension_to_project_features_to: int = 128,
+    ):
+        """Approximate Greedy Coreset sampling base class."""
+        self.number_of_starting_points = number_of_starting_points
+        super().__init__(percentage, device, dimension_to_project_features_to)
+
+    def _compute_greedy_coreset_indices(self, features: torch.Tensor) -> np.ndarray:
+        """Runs approximate iterative greedy coreset selection.
+
+        This greedy coreset implementation does not require computation of the
+        full N x N distance matrix and thus requires a lot less memory, however
+        at the cost of increased sampling times.
+
+        Args:
+            features: [NxD] input feature bank to sample.
+        """
+        number_of_starting_points = np.clip(
+            self.number_of_starting_points, None, len(features)
+        )
+        start_points = np.random.choice(
+            len(features), number_of_starting_points, replace=False
+        ).tolist()
+
+        approximate_distance_matrix = self._compute_batchwise_differences(
+            features, features[start_points]
+        )
+        approximate_coreset_anchor_distances = torch.mean(
+            approximate_distance_matrix, axis=-1
+        )
+        coreset_indices = []
+        num_coreset_samples = int(len(features) * self.percentage)
+
+        if num_coreset_samples > 50000:
+            LOGGER.warning(
+                "Approximate greedy coreset selection needs %d iterations "
+                "(percentage=%.3f over %d features). This is inherently "
+                "sequential and can take a long time -- consider lowering "
+                "--percentage if this run needs to fit in a time-limited job.",
+                num_coreset_samples,
+                self.percentage,
+                len(features),
+            )
+
+        # `feature_sq_norms` is constant across iterations (it only depends on
+        # `features`, never on the currently selected point), so it is computed
+        # once here instead of being recomputed inside `_compute_batchwise_differences`
+        # on every one of the (up to N * percentage) loop iterations below.
+        feature_sq_norms = (features * features).sum(-1)
+
+        with torch.no_grad():
+            for _ in tqdm.tqdm(range(num_coreset_samples), desc="Subsampling..."):
+                select_idx = torch.argmax(approximate_coreset_anchor_distances).item()
+                coreset_indices.append(select_idx)
+
+                selected_feature = features[select_idx]
+                coreset_select_distance = (
+                    feature_sq_norms
+                    + feature_sq_norms[select_idx]
+                    - 2 * features.mv(selected_feature)
+                ).clamp_(0, None).sqrt_()
+
+                approximate_coreset_anchor_distances = torch.minimum(
+                    approximate_coreset_anchor_distances, coreset_select_distance
+                )
+
+        return np.array(coreset_indices)
+
+
+class RandomSampler(BaseSampler):
+    def __init__(self, percentage: float):
+        super().__init__(percentage)
+
+    def run(
+        self, features: Union[torch.Tensor, np.ndarray]
+    ) -> Union[torch.Tensor, np.ndarray]:
+        """Randomly samples input feature collection.
+
+        Args:
+            features: [N x D]
+        """
+        num_random_samples = int(len(features) * self.percentage)
+        subset_indices = np.random.choice(
+            len(features), num_random_samples, replace=False
+        )
+        subset_indices = np.array(subset_indices)
+        return features[subset_indices]

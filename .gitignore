@@ -1,0 +1,27 @@
+.idea/
+__pycache__/
+.venv
+.DS_Store
+LabletAnomaly.egg-info/
+.pytest_cache/
+.env
+results
+
+# Le lock d'uv : 934 Ko qui rejouent des roues CUDA et des builds macOS pour un
+# dépôt qu'on installe sur trois plateformes différentes, et qui reconflit à
+# chaque relock. Les bornes qui comptent vivent dans pyproject.toml ; `uv sync`
+# le régénère en local.
+uv.lock
+
+# Images de scène
+data/
+
+# Banques en dossier, produites hors de la page
+models/
+
+# Banques empaquetées et images de fit. Un .pkg pèse de 80 Mo à 3 Go, quand
+# GitHub refuse au push tout fichier au-delà de 100 Mio : les banques se
+# distribuent en asset de release. Une petite banque peut être committée pour
+# de bon : git add -f coresets/<nom>.pkg
+coresets/*.pkg
+coresets/*/
