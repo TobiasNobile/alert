@@ -4,10 +4,19 @@ ALERT est un logiciel de démonstration clé en main, libre d’accès, destiné
 
 ## Démonstration Vidéo
 
-[![Regarder la vidéo](https://webtv.centralesupelec.fr/thumbnails/videos/v126d5bdf432dzs5gmpm0is8jx9831/thumb_large.jpg?st=2PqQEdLP-9tkiLKa2ajdMg&e=1791916238)](https://webtv.centralesupelec.fr/permalink/v126d5bdf432e5dhy5cy/iframe/?notabs#start=163&autopilot=no)
+[![Regarder la vidéo](https://webtv.centralesupelec.fr/thumbnails/videos/v126d5bdf432dzs5gmpm0is8jx9831/thumb_large.jpg)](https://webtv.centralesupelec.fr/videos/stage-alert/)
 
 
 ## Prérequis
+
+### Créer un environnement virtuel
+
+```shell
+python -m venv .venv
+source .venv/bin/activate
+```
+
+### Installer les dépendances
 
 Ouvrez votre environnement python et lancez depuis la racine du projet:
 ```shell
@@ -19,10 +28,6 @@ pip install -e .
 ```shell
 python main.py            # puis ouvrir http://127.0.0.1:8000
 ```
-
-## Interface
-
-
 
 ## Référence
 
