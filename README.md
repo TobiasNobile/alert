@@ -4,7 +4,7 @@ ALERT est un logiciel de démonstration clé en main, libre d’accès, destiné
 
 ## Démonstration Vidéo
 
-[![Regarder la vidéo](https://webtv.centralesupelec.fr/thumbnails/videos/v126d5bdf432dzs5gmpm0is8jx9831/thumb_large.jpg?st=2PqQEdLP-9tkiLKa2ajdMg&e=1791916238)](https://webtv.centralesupelec.fr/videos/stage-alert/)
+[![Regarder la vidéo](https://webtv.centralesupelec.fr/thumbnails/videos/v126d5bdf432dzs5gmpm0is8jx9831/thumb_large.jpg?st=2PqQEdLP-9tkiLKa2ajdMg&amp;e=1791916238)](https://webtv.centralesupelec.fr/videos/stage-alert/)
 
 
 ## Prérequis
