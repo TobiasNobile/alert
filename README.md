@@ -1,30 +1,15 @@
 # ALERT : Anomaly Localization & Early Real-Time Detection
 
-Fork de [amazon-science/patchcore-inspection](https://github.com/amazon-science/patchcore-inspection),
-l'implémentation de `PatchCore` (Roth et al., 2021, <https://arxiv.org/abs/2106.08265>),
-sous Apache 2.0.
+Alert est un logiciel de démonstration clé en main, libre d’accès, destiné aux usages académiques et industriels, permettant de détecter et de localiser en temps réel des anomalies dans un signal vidéo.
 
-PatchCore fait de la détection d'anomalie **one-class** : on ne lui montre que du
-normal. Il découpe les images d'entraînement en patchs, passe chacun dans un
-réseau pré-entraîné et garde les vecteurs obtenus dans une **banque**, ramenée à
-quelques pour cent de sa taille par un *coreset* qui en retient les plus
-représentatifs. Scorer une image neuve, c'est chercher pour chacun de ses patchs
-son plus proche voisin dans la banque : le score de l'image est la plus grande de
-ces distances, et la carte des distances dit *où* ça cloche. Rien n'est appris
-sur l'anomalie, seulement sur le normal — c'est ce qui permet de signaler ce
-qu'on n'a jamais vu.
+## Démonstration Vidéo
 
-## Ce que fait cette démo
-
-Une page web qui score une caméra **en direct** contre une banque et pose la
-carte des distances sur l'image : ce qui ne ressemble à rien de connu se teinte,
-le reste traverse intact. La même page construit les banques, depuis un zip
-d'images ou un dossier.
-
-La tâche livrée est « personne + couteau ». Le normal, c'est toute image
-contenant une personne et **aucun** couteau, prise dans **COCO 2017** ; les
-images de personne **avec** couteau ne rentrent jamais dans la banque, elles ne
-servent qu'à mesurer ce qui l'en sépare. Rien n'a été filmé pour ces banques.
+<iframe
+  src="https://webtv.centralesupelec.fr/permalink/v126d5bdf432e5dhy5cy/iframe/?notabs#start=163&autopilot=no"
+  width="800"
+  height="450"
+  allowfullscreen>
+</iframe>
 
 ## Démarrage rapide
 
